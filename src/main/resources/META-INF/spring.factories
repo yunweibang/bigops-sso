@@ -1,0 +1,13 @@
+org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
+  com.yunweibang.auth.conf.CustomConfiguration,\
+  com.yunweibang.auth.conf.MySSOConfig,\
+  com.yunweibang.auth.conf.KaptchaConfig,\
+  com.yunweibang.auth.controller.UserController,\
+  com.yunweibang.auth.controller.BgImgController,\
+  com.yunweibang.auth.conf.ResetPassTokenInterceptor,\
+  com.yunweibang.auth.conf.DisableSSLCertificateRunner
+  
+  
+
+ 
+  

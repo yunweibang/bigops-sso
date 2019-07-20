@@ -1,0 +1,23 @@
+###################  kaptcha配置  ###################
+kaptcha:
+  #渲染效果：水纹：WaterRipple；鱼眼：FishEyeGimpy；阴影：ShadowGimpy  
+  obscurificator:
+    impl: com.google.code.kaptcha.impl.ShadowGimpy
+  #不要噪点
+  noise:
+    impl: com.google.code.kaptcha.impl.NoNoise #DefaultNoise
+  image:
+    width: 100
+    height: 40
+  textproducer:
+    font:
+      size: 30
+      color: black
+      names: 宋体,楷体,微软雅黑
+    char:
+      length: 4
+      space: 5
+  background:
+    clear:
+      from: 0,153,194
+      to: 230,230,230

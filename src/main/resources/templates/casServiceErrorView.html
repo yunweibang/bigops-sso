@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta http-equiv="X-UA-Compatible" content="IE=edge"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no"/>
+    <link rel="icon" type="image/x-icon" href="/signin/favicon.ico"/>
+    <title>登录</title>
+    <link th:href="@{/css/cas.css}" rel="stylesheet"/>
+</head>
+
+<body>
+<main role="main" class="container mt-3 mb-3">
+    <div layout:fragment="content">
+        <div class="alert alert-danger">
+            <h2>未认证授权的服务</h2>
+            <p th:if="${rootCauseException != null and rootCauseException.code != null}">不允许未认证的服务访问您的目标应用。</p>
+        </div>
+    </div>
+</main>
+</body>
+</html>
