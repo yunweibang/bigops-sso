@@ -37,7 +37,7 @@ public class DisableSSLCertificateRunner implements CommandLineRunner {
         System.setProperty("com.sun.jndi.ldap.object.disableEndpointIdentification", "true");
         logger.info("sso init app url start to initialize ...");
         QueryRunner qr = new QueryRunner(JdbcUtils.getDs());
-        String sql = "select id from regexregisteredservice where serviceId=? limit 1 ";
+        String sql = "select id from RegexRegisteredService where serviceId=? limit 1 ";
         String serviceId = "^" + homeUrl + ".*";
         Object[] params = new Object[]{serviceId};
         Map map = null;
@@ -54,6 +54,7 @@ public class DisableSSLCertificateRunner implements CommandLineRunner {
             // 单点登出
             service.setLogoutUrl(new URL(homeUrl + "/api/auth/quit"));
             service.setTheme("default");
+            service.setEvaluationOrder(0);
             service.setLogoutType(LogoutType.BACK_CHANNEL);
             servicesManager.save(service);
             servicesManager.load();

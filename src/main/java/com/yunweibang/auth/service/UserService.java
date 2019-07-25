@@ -3,7 +3,10 @@ package com.yunweibang.auth.service;
 import com.google.common.base.Strings;
 import com.yunweibang.auth.common.JsonResponse;
 import com.yunweibang.auth.model.*;
-import com.yunweibang.auth.utils.*;
+import com.yunweibang.auth.utils.BCrypt;
+import com.yunweibang.auth.utils.IPUtils;
+import com.yunweibang.auth.utils.IPZone;
+import com.yunweibang.auth.utils.ToolUtil;
 import org.apache.commons.dbutils.QueryRunner;
 import org.apache.commons.dbutils.handlers.MapHandler;
 import org.apache.commons.dbutils.handlers.MapListHandler;
@@ -26,7 +29,7 @@ public class UserService {
     private static Logger logger = LoggerFactory.getLogger(UserService.class);
 
     public Map<String, Object> loadSetting(Integer id) {
-        QueryRunner qr = new QueryRunner(JdbcUtils.getDs());
+        QueryRunner qr = new QueryRunner(com.yunweibang.auth.utils.JdbcUtils.getDs());
         String sql = "select * from notifications where id=" + id;
         List<Map<String, Object>> settings = null;
         try {
@@ -64,7 +67,7 @@ public class UserService {
         String msg = "验证码为" + validateCode + "，请在2分钟内回填。";
         if (Objects.nonNull(notifications)) {
             if (sendMailConfig(notifications, title, msg)) {
-                TxQueryRunner tx = new TxQueryRunner();
+                com.yunweibang.auth.utils.TxQueryRunner tx = new com.yunweibang.auth.utils.TxQueryRunner();
                 String sql = " insert into sso_find_pwd(account,email,validate_code,create_time,code_expire_time,is_success)  values(?,?,?,?,?,?) ";
                 Date d = new Date();
                 Calendar c = Calendar.getInstance();
@@ -99,7 +102,7 @@ public class UserService {
         if (!password1.equals(password2)) {
             return new JsonResponse<Object>(502, "两次输入的密码不一致", null);
         }
-        QueryRunner qr = new QueryRunner(JdbcUtils.getDs());
+        QueryRunner qr = new QueryRunner(com.yunweibang.auth.utils.JdbcUtils.getDs());
         String sql = "select * from sso_find_pwd where token= ? ";
         Object[] params = new Object[]{token};
         Map map = null;
@@ -107,7 +110,7 @@ public class UserService {
             map = qr.query(sql, new MapHandler(), params);
             if (map != null && map.containsKey("id")) {
                 logger.info("editPasswd select token success");
-                TxQueryRunner tx = new TxQueryRunner();
+                com.yunweibang.auth.utils.TxQueryRunner tx = new com.yunweibang.auth.utils.TxQueryRunner();
                 String updatepasssql = "update ri_user set pass=? ,mtime=? where account=? and email=?";
                 String md5pwd = BCrypt.hashpw(password1, BCrypt.gensalt());
                 Object[] pdatepassparams = new Object[]{md5pwd, new Date(), map.get("account").toString(),
@@ -131,7 +134,7 @@ public class UserService {
 
     public JsonResponse<Object> validateEmail(ValidateEmailDTO dto, HttpServletRequest request) {
         String ip = IPUtils.getIpAddr(request);
-        QueryRunner qr = new QueryRunner(JdbcUtils.getDs());
+        QueryRunner qr = new QueryRunner(com.yunweibang.auth.utils.JdbcUtils.getDs());
         String sql = "select * from sso_find_pwd where account=? and email=? and validate_code= ?";
         Object[] params = new Object[]{dto.getAccount(), dto.getEmail(), dto.getCode()};
         Map map = null;
@@ -159,7 +162,7 @@ public class UserService {
             logger.error("select sql validateEmail error", e);
         }
         String token = UUID.randomUUID().toString().replace("-", "");
-        TxQueryRunner tx = new TxQueryRunner();
+        com.yunweibang.auth.utils.TxQueryRunner tx = new com.yunweibang.auth.utils.TxQueryRunner();
         String updatesql = "update sso_find_pwd set token=? , token_expire_time=? ,modify_time=? ,validate_code=?,code_expire_time=? where id= ?";
         Calendar c = Calendar.getInstance();
         c.add(Calendar.MINUTE, 2);
@@ -177,7 +180,7 @@ public class UserService {
     }
 
     public void clearPassRecord(String token) {
-        TxQueryRunner tx = new TxQueryRunner();
+        com.yunweibang.auth.utils.TxQueryRunner tx = new com.yunweibang.auth.utils.TxQueryRunner();
 
         String updatesql = "update sso_find_pwd set token=? ,is_success=? ,modify_time=?  where token=?";
 
@@ -205,7 +208,7 @@ public class UserService {
             return new JsonResponse<Object>(401, "图形验证码错误", null);
         }
 
-        QueryRunner qr = new QueryRunner(JdbcUtils.getDs());
+        QueryRunner qr = new QueryRunner(com.yunweibang.auth.utils.JdbcUtils.getDs());
         String sql = "select * from ri_user where account= ? and email = ? ";
         Object[] params = new Object[]{dto.getAccount(), dto.getEmail()};
         Map map = null;
@@ -224,7 +227,7 @@ public class UserService {
     }
 
     public boolean isLdapAuthType() {
-        QueryRunner qr = new QueryRunner(JdbcUtils.getDs());
+        QueryRunner qr = new QueryRunner(com.yunweibang.auth.utils.JdbcUtils.getDs());
         String sql = "select * from sso_auth where type='ldap'";
         Map map = null;
         try {
@@ -245,10 +248,10 @@ public class UserService {
 
     public void insertFaillog(String username, String ip, String content) {
         String address = getCityAddress(ip);
-        TxQueryRunner tx = new TxQueryRunner();
+        com.yunweibang.auth.utils.TxQueryRunner tx = new com.yunweibang.auth.utils.TxQueryRunner();
         String logsql = " insert into log_login(account,status,operation,content,ip,city,ctime)  values(?,?,?,?,?,?,?) ";
         Date d = new Date();
-        Object[] logparams = new Object[]{username, Constants.LOGIN_STATUS_FAIL, Constants.FIND_PASSWORD, content, ip, address, d};
+        Object[] logparams = new Object[]{username, com.yunweibang.auth.utils.Constants.LOGIN_STATUS_FAIL, com.yunweibang.auth.utils.Constants.FIND_PASSWORD, content, ip, address, d};
         try {
             tx.update(logsql, logparams);
         } catch (Exception ex) {
@@ -258,10 +261,10 @@ public class UserService {
 
     public void insertSuccesslog(String username, String ip) {
         String address = getCityAddress(ip);
-        TxQueryRunner tx = new TxQueryRunner();
+        com.yunweibang.auth.utils.TxQueryRunner tx = new com.yunweibang.auth.utils.TxQueryRunner();
         String logsql = " insert into log_login(account,status,operation,content,ip,city,ctime)  values(?,?,?,?,?,?,?) ";
         Date d = new Date();
-        Object[] logparams = new Object[]{username, Constants.LOGIN_STATUS_SUCCESS, Constants.FIND_PASSWORD, "找回密码成功", ip, address, d};
+        Object[] logparams = new Object[]{username, com.yunweibang.auth.utils.Constants.LOGIN_STATUS_SUCCESS, com.yunweibang.auth.utils.Constants.FIND_PASSWORD, "找回密码成功", ip, address, d};
 
         try {
             int logresult = tx.update(logsql, logparams);
@@ -274,9 +277,9 @@ public class UserService {
     }
 
     public String getCityAddress(String ip) {
-        QQWry qqwry = null;
+        com.yunweibang.auth.utils.QQWry qqwry = null;
         try {
-            qqwry = new QQWry();
+            qqwry = new com.yunweibang.auth.utils.QQWry();
         } catch (IOException e) {
             e.printStackTrace();
             return null;
@@ -287,7 +290,7 @@ public class UserService {
     }
 
     public void sendMessageToUser(String userName, String title, String msg) {
-        QueryRunner qr = new QueryRunner(JdbcUtils.getDs());
+        QueryRunner qr = new QueryRunner(com.yunweibang.auth.utils.JdbcUtils.getDs());
         String sql = "select * from ri_user where account= ? limit 1";
         Object[] params = new Object[]{userName};
         Map map = null;
@@ -360,7 +363,7 @@ public class UserService {
                 titleSign = notifications.getTitleSign();
             }
             if (Objects.nonNull(notifications.getContentSign())) {
-                contentSign = Constants.LINE_SEPARATOR + Constants.LINE_SEPARATOR + notifications.getContentSign();
+                contentSign = com.yunweibang.auth.utils.Constants.LINE_SEPARATOR + com.yunweibang.auth.utils.Constants.LINE_SEPARATOR + notifications.getContentSign();
             }
             simpleMailMessage.setSubject(titleSign + title);
             simpleMailMessage.setText(msg + contentSign);
@@ -379,7 +382,7 @@ public class UserService {
     public boolean testWechatConfig(Notifications notifications) {
         String msg = "密码输错次数过多,请5分钟后重试!";
         try {
-            return WeiXinUtils.sendTextMsg(notifications.getUser(), notifications.getPass(), notifications.getSendTo(),
+            return com.yunweibang.auth.utils.WeiXinUtils.sendTextMsg(notifications.getUser(), notifications.getPass(), notifications.getSendTo(),
                     Integer.parseInt(notifications.getCorpId()), msg);
         } catch (Exception ex) {
             try {
@@ -394,7 +397,7 @@ public class UserService {
     public boolean testDingDingConfig(Notifications notifications) {
         String msg = "密码输错次数过多,请5分钟后重试!";
         try {
-            return WeiXinUtils.sendTextMsg(notifications.getCorpId(), notifications.getPass(), notifications.getSendTo(),
+            return com.yunweibang.auth.utils.WeiXinUtils.sendTextMsg(notifications.getCorpId(), notifications.getPass(), notifications.getSendTo(),
                     Integer.parseInt(notifications.getUser()), msg);
         } catch (Exception ex) {
             try {
@@ -418,7 +421,7 @@ public class UserService {
         if (!Pattern.matches("^(?![0-9]+$)(?![a-zA-Z]+$)(?![_~@#\\$]+$)[0-9A-Za-z_~@#\\$]{6,16}$", dto.getPass())) {
             return new JsonResponse<Object>(501, "密码格式错误", null);
         }
-        TxQueryRunner qr = new TxQueryRunner();
+        com.yunweibang.auth.utils.TxQueryRunner qr = new com.yunweibang.auth.utils.TxQueryRunner();
         String sql = "select id,account from ri_user where account= ? ";
         Object[] params = new Object[]{dto.getAccount()};
         Map map = null;
@@ -434,7 +437,7 @@ public class UserService {
                 String title = "注册用户成功";
                 String msg = "欢迎使用比格自动化运维平台，请等待管理员审批。";
                 sendMessageToUser(dto.getAccount(), title, msg);
-                return new JsonResponse<Object>(200, "注册成功", JdbcUtils.getDomainUrl());
+                return new JsonResponse<Object>(200, "注册成功", com.yunweibang.auth.utils.JdbcUtils.getDomainUrl());
 
             }
         } catch (Exception e) {
@@ -443,11 +446,11 @@ public class UserService {
         return new JsonResponse<Object>(403, "注册失败", null);
     }
 
-    private void insertMsgBox(AccountRegistryDTO dto, TxQueryRunner tx) {
+    private void insertMsgBox(AccountRegistryDTO dto, com.yunweibang.auth.utils.TxQueryRunner tx) {
         String sql = "insert into msg_box(receive_user,title,content,type,send_time,read_status,send_user,delete_status)  values(?,?,?,?,?,?,?,?)";
 
         String title = "审批新用户" + dto.getAccount() + "通知";
-        String msg = "新用户" + dto.getAccount() + "已注册成功，等待您审批。";
+        String msg = "新用户" + dto.getAccount() + "已注册成功，等待您激活。请到资源->用户->常用管理->待激活用户，进行激活";
         Object[] params = new Object[]{"admin",
                 title,
                 msg,
@@ -459,7 +462,7 @@ public class UserService {
         }
     }
 
-    public void insertUserAccount(AccountRegistryDTO dto, TxQueryRunner tx) {
+    public void insertUserAccount(AccountRegistryDTO dto, com.yunweibang.auth.utils.TxQueryRunner tx) {
         String sql = "insert into ri_user(name,account,pass,email,etime,status)  values(?,?,?,?,?,?)";
         String saltpwd = BCrypt.hashpw(dto.getPass(), BCrypt.gensalt());
         Object[] params = new Object[]{dto.getName(), dto.getAccount(), saltpwd, dto.getEmail(), "9999-01-01 01:01:01", "待激活"};
@@ -471,7 +474,7 @@ public class UserService {
     }
 
     public void sendRegisterMessageToAdmin(String userName) {
-        QueryRunner qr = new QueryRunner(JdbcUtils.getDs());
+        QueryRunner qr = new QueryRunner(com.yunweibang.auth.utils.JdbcUtils.getDs());
         String sql = "select email from ri_user where account= ? limit 1";
         Object[] params = new Object[]{"admin"};
         Map map = null;
@@ -483,7 +486,7 @@ public class UserService {
                 if (Objects.nonNull(notifications)) {
                     notifications.setSendTo((String) map.get("email"));
                     String title = "审批新用户" + userName + "通知";
-                    String msg = "新用户" + userName + "已注册成功，等待您审批。";
+                    String msg = "新用户" + userName + "已注册成功，等待您激活。请到资源->用户->常用管理->待激活用户，进行激活";
                     sendMailConfig(notifications, title, msg);
                 }
             }
@@ -493,6 +496,6 @@ public class UserService {
     }
 
     public JsonResponse<Object> getHomeUrl() {
-        return new JsonResponse<Object>(JdbcUtils.getDomainUrl());
+        return new JsonResponse<Object>(com.yunweibang.auth.utils.JdbcUtils.getDomainUrl());
     }
 }
