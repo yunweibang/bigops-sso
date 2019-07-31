@@ -357,7 +357,7 @@
         <dependency>
             <groupId>mysql</groupId>
             <artifactId>mysql-connector-java</artifactId>
-            <version>5.1.21</version>
+            <version>8.0.11</version>
         </dependency>
         <dependency>
             <groupId>javax.servlet</groupId>
@@ -422,6 +422,17 @@
             <groupId>com.yunweibang</groupId>
             <artifactId>casdisablessl</artifactId>
             <version>5.3.8</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.httpcomponents</groupId>
+            <artifactId>httpasyncclient</artifactId>
+            <version>4.1.4</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.httpcomponents</groupId>
+            <artifactId>httpcore-nio</artifactId>
+            <version>4.4.10</version>
         </dependency>
 
         <dependency>
