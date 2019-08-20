@@ -5,7 +5,8 @@ org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
   com.yunweibang.auth.controller.UserController,\
   com.yunweibang.auth.controller.BgImgController,\
   com.yunweibang.auth.conf.ResetPassTokenInterceptor,\
-  com.yunweibang.auth.conf.DisableSSLCertificateRunner
+  com.yunweibang.auth.conf.DisableSSLCertificateRunner,\
+  com.yunweibang.auth.conf.DynamicPassWebflowConfiguration
   
   
 

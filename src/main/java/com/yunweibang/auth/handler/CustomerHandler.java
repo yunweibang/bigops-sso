@@ -2,7 +2,10 @@ package com.yunweibang.auth.handler;
 
 import com.alibaba.fastjson.JSONObject;
 import com.yunweibang.auth.exceptions.AccountDisabledOrExpiredException;
+import com.yunweibang.auth.exceptions.DynamicCodeExpiredException;
+import com.yunweibang.auth.exceptions.DynamicCodeIsNullException;
 import com.yunweibang.auth.exceptions.TooManyCountException;
+import com.yunweibang.auth.model.UsernamePassDynamicPassCredential;
 import com.yunweibang.auth.service.UserService;
 import com.yunweibang.auth.utils.*;
 import org.apache.commons.dbutils.QueryRunner;
@@ -10,7 +13,10 @@ import org.apache.commons.dbutils.handlers.ArrayListHandler;
 import org.apache.commons.dbutils.handlers.MapHandler;
 import org.apache.commons.dbutils.handlers.MapListHandler;
 import org.apache.commons.lang3.StringUtils;
-import org.apereo.cas.authentication.*;
+import org.apereo.cas.authentication.AuthenticationHandlerExecutionResult;
+import org.apereo.cas.authentication.Credential;
+import org.apereo.cas.authentication.MessageDescriptor;
+import org.apereo.cas.authentication.PreventedException;
 import org.apereo.cas.authentication.exceptions.AccountDisabledException;
 import org.apereo.cas.authentication.handler.support.AbstractPreAndPostProcessingAuthenticationHandler;
 import org.apereo.cas.authentication.principal.PrincipalFactory;
@@ -41,13 +47,14 @@ public class CustomerHandler extends AbstractPreAndPostProcessingAuthenticationH
         super(name, servicesManager, principalFactory, order);
     }
 
-    @SuppressWarnings({"deprecation", "unused"})
+    @SuppressWarnings({"deprecation"})
     protected AuthenticationHandlerExecutionResult doAuthentication(Credential credential)
             throws GeneralSecurityException, PreventedException {
-        UsernamePasswordCredential usernamePasswordCredentia = (UsernamePasswordCredential) credential;
+        UsernamePassDynamicPassCredential usernamePasswordCredentia = (UsernamePassDynamicPassCredential) credential;
 
         String username = usernamePasswordCredentia.getUsername();
         String password = usernamePasswordCredentia.getPassword();
+        String code = usernamePasswordCredentia.getCode();
         String address = null;
         ClientInfo clientInfo = ClientInfoHolder.getClientInfo();
         logger.info("clientInfo=" + JsonUtil.toJson(clientInfo));
@@ -58,7 +65,6 @@ public class CustomerHandler extends AbstractPreAndPostProcessingAuthenticationH
             throw new AccountDisabledException();
         } else if (StringUtils.isBlank(password)) {
             throw new AccountLockedException();
-
         } else {
             QueryRunner qr = new QueryRunner(JdbcUtils.getDs());
             String logloginsql = "select ctime from log_login where ctime > ? and status=? and account =? order by ctime desc ";
@@ -71,7 +77,8 @@ public class CustomerHandler extends AbstractPreAndPostProcessingAuthenticationH
                 counts = qr.query(logloginsql, logloginparams, new MapListHandler());
                 if (counts != null) {
                     SimpleDateFormat sdfTime = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
-                    boolean flag = counts.size() >= 5 && new Date().getTime() - sdfTime.parse(counts.get(0).get("ctime").toString()).getTime() < 10 * 60 * 1000;
+                    boolean flag = counts.size() >= 5 && new Date().getTime()
+                            - sdfTime.parse(counts.get(0).get("ctime").toString()).getTime() < 10 * 60 * 1000;
                     logger.info("loglogin flag= {}", flag);
                     if (flag) {
                         UserService userservice = new UserService();
@@ -130,32 +137,33 @@ public class CustomerHandler extends AbstractPreAndPostProcessingAuthenticationH
 
                     Set<String> setmysql = mapmysql.keySet(); // 获取map的键
 
-                    boolean adminConnstate = false; // admin 登录状态
                     boolean userConnstate = false; // user 登录状态
 
                     Map<String, Object> map = new HashMap<>();
 
                     if (flagssl) { // 启用 ldapssl
 
-                        adminConnstate = LDAPUtil.admin_sslconnect(baseDn, bindUser, bindPass, url);
-                        logger.info("//==========admin ldap ssl connect state is :" + adminConnstate);
+                        userConnstate = LDAPUtil.user_sslconnect(baseDn, bindUser, bindPass, url);
+                        logger.info("//==========user ldap ssl connect state is :" + userConnstate);
                     } else {
 
-                        adminConnstate = LDAPUtil.admin_connect(baseDn, bindUser, bindPass, url);
-                        logger.info("//==========admin ldap connect state is :" + adminConnstate);
+                        userConnstate = LDAPUtil.user_connect(baseDn, bindUser, bindPass, url);
+                        logger.info("//==========user ldap connect state is :" + userConnstate);
                     }
 
-                    if (adminConnstate) { // 管理员登录成功
+                    if (userConnstate) { // ldap登录成功
 
-                        map = LDAPUtil.getUser(username, filter); // 管理员获取登录用户的信息
+                        map = LDAPUtil.getUser(username, filter); // 获取用户的信息
 
                         LDAPUtil.closeContext();
                         if (map == null || map.isEmpty()) {
                             logger.info("LDAPUtil.getUser is empty");
                             if (isldaps) {
-                                insertfailurelog(username + "(未知)", clientInfo, "用户不存在,登录失败", logsql, tx, address, LDAPS_LOGIN);
+                                insertfailurelog(username + "(未知)", clientInfo, "用户不存在,登录失败", logsql, tx, address,
+                                        LDAPS_LOGIN);
                             } else {
-                                insertfailurelog(username + "(未知)", clientInfo, "用户不存在,登录失败", logsql, tx, address, LDAP_LOGIN);
+                                insertfailurelog(username + "(未知)", clientInfo, "用户不存在,登录失败", logsql, tx, address,
+                                        LDAP_LOGIN);
                             }
                             throw new FailedLoginException();
                         }
@@ -178,42 +186,74 @@ public class CustomerHandler extends AbstractPreAndPostProcessingAuthenticationH
                             dnArray = userdn.split(",");
                         }
 
-                        for (int i = 0; i < dnArray.length; i++) {
-
-                            if (!dnArray[i].contains(filter)) {
-                                userbaseDn = userbaseDn + dnArray[i] + ",";
-                            }
-
-                        }
-                        userbaseDn = userbaseDn.substring(0, userbaseDn.length() - 1);
-
-                        //验证是否在ou范围内，不是则不让登陆
                         boolean ouFlag = true;
+                        if (dnArray != null) {
 
-                        if (userOu.contains("||")) {
+                            for (int i = 0; i < dnArray.length; i++) {
 
-                            String[] userOus = userOu.split("\\|\\|");
+                                if (!dnArray[i].contains(filter)) {
+                                    userbaseDn = userbaseDn + dnArray[i] + ",";
+                                }
 
-                            for (String ou : userOus) {
+                            }
+                            userbaseDn = userbaseDn.substring(0, userbaseDn.length() - 1);
 
-                                ouFlag = true;
+                            if (userOu.contains("||")) {
+
+                                String[] userOus = userOu.split("\\|\\|");
+
+                                for (String ou : userOus) {
+
+                                    ouFlag = true;
+
+                                    String distinguishedName = map.get("distinguishedName").toString().toLowerCase();
+                                    ou = ou.toLowerCase();
+
+                                    distinguishedName = distinguishedName.replaceAll(" ", "");
+                                    ou = ou.replaceAll(" ", "");
+
+                                    if (ou.length() > distinguishedName.length()) {
+
+                                        ouFlag = false;
+                                    }
+
+                                    int j = distinguishedName.length() - 1;
+
+                                    for (int i = ou.length() - 1; i >= 0; i--) {
+
+                                        if (distinguishedName.charAt(j) != ou.charAt(i)) {
+
+                                            ouFlag = false;
+                                        }
+
+                                        j--;
+                                    }
+
+                                    if (ouFlag) {
+
+                                        break;
+                                    }
+
+                                }
+
+                            } else {
 
                                 String distinguishedName = map.get("distinguishedName").toString().toLowerCase();
-                                ou = ou.toLowerCase();
+                                userOu = userOu.toLowerCase();
 
                                 distinguishedName = distinguishedName.replaceAll(" ", "");
-                                ou = ou.replaceAll(" ", "");
+                                userOu = userOu.replaceAll(" ", "");
 
-                                if (ou.length() > distinguishedName.length()) {
+                                if (userOu.length() > distinguishedName.length()) {
 
                                     ouFlag = false;
                                 }
 
                                 int j = distinguishedName.length() - 1;
 
-                                for (int i = ou.length() - 1; i >= 0; i--) {
+                                for (int i = userOu.length() - 1; i >= 0; i--) {
 
-                                    if (distinguishedName.charAt(j) != ou.charAt(i)) {
+                                    if (distinguishedName.charAt(j) != userOu.charAt(i)) {
 
                                         ouFlag = false;
                                     }
@@ -221,54 +261,16 @@ public class CustomerHandler extends AbstractPreAndPostProcessingAuthenticationH
                                     j--;
                                 }
 
-                                if (ouFlag) {
-
-                                    break;
-                                }
-
                             }
 
-                        } else {
+                            if (!ouFlag) {
 
-                            String distinguishedName = map.get("distinguishedName").toString().toLowerCase();
-                            userOu = userOu.toLowerCase();
-
-                            distinguishedName = distinguishedName.replaceAll(" ", "");
-                            userOu = userOu.replaceAll(" ", "");
-
-                            if (userOu.length() > distinguishedName.length()) {
-
-                                ouFlag = false;
+                                logger.error("user 不在 userOu的范围内，禁止登录！  user:" + map.get("distinguishedName")
+                                        + "; userOu:" + userOu);
+                                throw new RuntimeException("user 不在 userOu的范围内，禁止登录！  user:"
+                                        + map.get("distinguishedName") + "; userOu:" + userOu);
                             }
 
-                            int j = distinguishedName.length() - 1;
-
-                            for (int i = userOu.length() - 1; i >= 0; i--) {
-
-                                if (distinguishedName.charAt(j) != userOu.charAt(i)) {
-
-                                    ouFlag = false;
-                                }
-
-                                j--;
-                            }
-
-                        }
-
-                        if (!ouFlag) {
-
-                            logger.error("user 不在 userOu的范围内，禁止登录！  user:" + map.get("distinguishedName") + "; userOu:" + userOu);
-                            throw new RuntimeException("user 不在 userOu的范围内，禁止登录！  user:" + map.get("distinguishedName") + "; userOu:" + userOu);
-                        }
-
-                        if (flagssl) { // 启用 ldapssl
-
-                            userConnstate = LDAPUtil.user_sslconnect(userbaseDn, userdn, password, url); // 用户登录 ldapssl
-                            logger.info("//==========user ldap ssl connect state is :" + userConnstate);
-                        } else {
-
-                            userConnstate = LDAPUtil.user_connect(userbaseDn, userdn, password, url); // 用户登录 ldap
-                            logger.info("//==========user ldap connect state is :" + userConnstate);
                         }
 
                         if (userConnstate) { // 用户登录成功
@@ -317,9 +319,11 @@ public class CustomerHandler extends AbstractPreAndPostProcessingAuthenticationH
 
                                 if (qr.update(sqlupdate, params.toArray()) > 0) {
                                     if (isldaps) {
-                                        insertldapSuccesslog(clientInfo, username, address, logsql, tx, LDAPS_LOGIN, Constants.LOGIN_SUCCESS);
+                                        insertldapSuccesslog(clientInfo, username, address, logsql, tx, LDAPS_LOGIN,
+                                                Constants.LOGIN_SUCCESS);
                                     } else {
-                                        insertldapSuccesslog(clientInfo, username, address, logsql, tx, LDAP_LOGIN, Constants.LOGIN_SUCCESS);
+                                        insertldapSuccesslog(clientInfo, username, address, logsql, tx, LDAP_LOGIN,
+                                                Constants.LOGIN_SUCCESS);
                                     }
                                     return createHandlerResult(credential,
                                             this.principalFactory.createPrincipal(username, mapdb), mlist);
@@ -332,7 +336,8 @@ public class CustomerHandler extends AbstractPreAndPostProcessingAuthenticationH
                                     if (mapdb.get(s) != null && !"".equals(String.valueOf(mapdb.get(s)))) {
                                         sqlinsert = sqlinsert + s + ",";
                                         if ("etime".equals(s)) {
-                                            params.add(Constants.FT.format(DateUtil.fromDnetToJdate(mapdb.get(s).toString())));
+                                            params.add(Constants.FT
+                                                    .format(DateUtil.fromDnetToJdate(mapdb.get(s).toString())));
                                         } else {
                                             params.add(mapdb.get(s));
                                         }
@@ -346,7 +351,7 @@ public class CustomerHandler extends AbstractPreAndPostProcessingAuthenticationH
                                     sqlinsert = sqlinsert + "etime,";
                                     params.add(Constants.FT.parse("9999-01-01 01:01:01"));
                                 }
-                                sqlinsert = sqlinsert + "pass,status) values (";
+                                sqlinsert = sqlinsert + "pass,status,mfa) values (";
                                 for (String s : setupdate) {
                                     if (mapdb.get(s) != null && !"".equals(String.valueOf(mapdb.get(s)))) {
                                         sqlinsert = sqlinsert + "?,";
@@ -356,15 +361,18 @@ public class CustomerHandler extends AbstractPreAndPostProcessingAuthenticationH
                                     sqlinsert = sqlinsert + "?,";
                                 }
 
-                                sqlinsert = sqlinsert + "?,?)";
+                                sqlinsert = sqlinsert + "?,?,?)";
                                 params.add(pwd);
                                 params.add("启用");
+                                params.add("禁用");
 
                                 if (qr.update(sqlinsert, params.toArray()) > 0) {
                                     if (isldaps) {
-                                        insertldapSuccesslog(clientInfo, username, address, logsql, tx, LDAPS_LOGIN, Constants.LOGIN_SUCCESS);
+                                        insertldapSuccesslog(clientInfo, username, address, logsql, tx, LDAPS_LOGIN,
+                                                Constants.LOGIN_SUCCESS);
                                     } else {
-                                        insertldapSuccesslog(clientInfo, username, address, logsql, tx, LDAP_LOGIN, Constants.LOGIN_SUCCESS);
+                                        insertldapSuccesslog(clientInfo, username, address, logsql, tx, LDAP_LOGIN,
+                                                Constants.LOGIN_SUCCESS);
                                     }
                                     logger.info("// ldap================" + username + JsonUtil.toJson(mapdb));
                                     return createHandlerResult(credential,
@@ -376,9 +384,11 @@ public class CustomerHandler extends AbstractPreAndPostProcessingAuthenticationH
 
                             logger.info("//========user connect faild ");
                             if (isldaps) {
-                                insertfailurelog(username, clientInfo, Constants.LOGIN_FAIL, logsql, tx, address, LDAPS_LOGIN);
+                                insertfailurelog(username, clientInfo, Constants.LOGIN_FAIL, logsql, tx, address,
+                                        LDAPS_LOGIN);
                             } else {
-                                insertfailurelog(username, clientInfo, Constants.LOGIN_FAIL, logsql, tx, address, LDAP_LOGIN);
+                                insertfailurelog(username, clientInfo, Constants.LOGIN_FAIL, logsql, tx, address,
+                                        LDAP_LOGIN);
                             }
                             throw new FailedLoginException();
                         }
@@ -387,16 +397,18 @@ public class CustomerHandler extends AbstractPreAndPostProcessingAuthenticationH
 
                         logger.info("//========admin connect faild ");
                         if (isldaps) {
-                            insertfailurelog(username, clientInfo, Constants.LOGIN_FAIL, logsql, tx, address, LDAPS_LOGIN);
+                            insertfailurelog(username, clientInfo, Constants.LOGIN_FAIL, logsql, tx, address,
+                                    LDAPS_LOGIN);
                         } else {
-                            insertfailurelog(username, clientInfo, Constants.LOGIN_FAIL, logsql, tx, address, LDAP_LOGIN);
+                            insertfailurelog(username, clientInfo, Constants.LOGIN_FAIL, logsql, tx, address,
+                                    LDAP_LOGIN);
                         }
                         throw new FailedLoginException();
                     }
 
                 }
             } catch (Exception e) {
-                logger.error("sql erroe :" + e.toString());
+                logger.error("sql error :" + e.toString());
             }
 
             String usersql = "select * from ri_user where account = ?";
@@ -405,37 +417,31 @@ public class CustomerHandler extends AbstractPreAndPostProcessingAuthenticationH
             try {
                 usermap = qr.query(usersql, new MapHandler(), userparams);
                 if (usermap != null && usermap.containsKey("id")) {
-                    System.out.println("usermap=" + usermap);
+                    Map<String, Object> result = new HashMap<String, Object>();
+                    Set<String> sets = (Set<String>) usermap.keySet();
+                    Set<String> principalAttributesets = PrincipalAttributeUtils.getPrincipalAttributes();
+                    boolean b = sets.containsAll(principalAttributesets);
+                    if (b) {
+                        for (String value : principalAttributesets) {
+                            result.put(value, usermap.get(value));
+                        }
+                    } else {
+                        throw new RuntimeException("cas.principal.attributes 属性错误");
+                    }
                     Date etime = null;
-
                     if (usermap.get("etime") != null) {
                         SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
                         etime = format.parse(usermap.get("etime").toString());
                     }
-                    if (!"启用".equals((String) usermap.get("status")) || (etime != null && etime.getTime() < new Date().getTime())) {
+                    if (!"启用".equals((String) usermap.get("status"))
+                            || (etime != null && etime.getTime() < new Date().getTime())) {
                         throw new AccountDisabledOrExpiredException();
                     }
+                    boolean passSucess = false;
                     if (BCrypt.checkpw(password, String.valueOf(usermap.get("pass")))) {
-
-                        Map<String, Object> result = new HashMap<String, Object>();
-
-                        Set<String> sets = (Set<String>) usermap.keySet();
-
-                        Set<String> principalAttributesets = PrincipalAttributeUtils.getPrincipalAttributes();
-
-                        boolean b = sets.containsAll(principalAttributesets);
-
-                        if (b) {
-                            for (String value : principalAttributesets) {
-                                result.put(value, usermap.get(value));
-                            }
-                        } else {
-                            throw new RuntimeException(" cas.principal.attributes  属性错误");
-                        }
-                        logger.info("result  attributes" + JsonUtil.toJson(result));
                         Date d = new Date();
-
-                        Object[] logparams = new Object[]{usermap.get("account").toString(), Constants.LOGIN_STATUS_SUCCESS, Constants.LOGIN, Constants.LOGIN_SUCCESS, MYSQL_LOGIN,
+                        Object[] logparams = new Object[]{usermap.get("account").toString(),
+                                Constants.LOGIN_STATUS_SUCCESS, Constants.LOGIN, Constants.LOGIN_SUCCESS, MYSQL_LOGIN,
                                 clientInfo.getClientIpAddress(), address, d};
                         try {
                             int logresult = tx.update(logsql, logparams);
@@ -445,22 +451,58 @@ public class CustomerHandler extends AbstractPreAndPostProcessingAuthenticationH
                         } catch (Exception ex) {
                             throw new RuntimeException(ex);
                         }
+                        passSucess = true;
+
+                    }
+                    if (!passSucess) {
+                        insertfailurelog(username, clientInfo, Constants.LOGIN_FAIL, logsql, tx, address, MYSQL_LOGIN);
+                        throw new FailedLoginException();
+                    }
+                    if ("启用".equals((String) usermap.get("mfa"))) {
+                        String secretKey = (String) usermap.get("secretkey");
+                        if (StringUtils.isBlank(code)) {
+                            throw new DynamicCodeIsNullException();
+                        } else {
+                            if (StringUtils.isBlank(secretKey)) {
+                                throw new DynamicCodeExpiredException();
+                            } else if (!GoogleAuthenticatorUtils.verify(secretKey, code)) {
+                                throw new DynamicCodeExpiredException();
+                            } else {
+                                if (passSucess) {
+                                    // 允许登录，并且通过this.principalFactory.createPrincipal 来返回用户属性
+                                    List<MessageDescriptor> list = new ArrayList<>();
+                                    return createHandlerResult(credential, this.principalFactory.createPrincipal(username, result),
+                                            list);
+                                } else {
+                                    throw new DynamicCodeExpiredException();
+                                }
+                            }
+                        }
+                    }
+                    if (passSucess) {
                         // 允许登录，并且通过this.principalFactory.createPrincipal 来返回用户属性
                         List<MessageDescriptor> list = new ArrayList<>();
                         return createHandlerResult(credential, this.principalFactory.createPrincipal(username, result),
                                 list);
                     }
-                    insertfailurelog(username, clientInfo, Constants.LOGIN_FAIL, logsql, tx, address, MYSQL_LOGIN);
                     throw new FailedLoginException();
+
                 } else {
-                    insertfailurelog(username + "(未知)", clientInfo, Constants.LOGIN_FAIL, logsql, tx, address, MYSQL_LOGIN);
+                    insertfailurelog(username + "(未知)", clientInfo, Constants.LOGIN_FAIL, logsql, tx, address,
+                            MYSQL_LOGIN);
                     throw new FailedLoginException();
                 }
-            } catch (AccountDisabledOrExpiredException e1) {
-                e1.printStackTrace();
+            } catch (AccountDisabledOrExpiredException e) {
+                e.printStackTrace();
                 throw new AccountDisabledOrExpiredException();
-            } catch (FailedLoginException e2) {
-                e2.printStackTrace();
+            } catch (DynamicCodeIsNullException e) {
+                e.printStackTrace();
+                throw new DynamicCodeIsNullException();
+            } catch (DynamicCodeExpiredException e) {
+                e.printStackTrace();
+                throw new DynamicCodeExpiredException();
+            } catch (FailedLoginException e) {
+                e.printStackTrace();
                 throw new FailedLoginException();
             } catch (Exception e) {
                 e.printStackTrace();
@@ -473,7 +515,7 @@ public class CustomerHandler extends AbstractPreAndPostProcessingAuthenticationH
     }
 
     public boolean supports(Credential credential) {
-        return credential instanceof UsernamePasswordCredential;
+        return credential instanceof UsernamePassDynamicPassCredential;
     }
 
     public String getCityAddress(ClientInfo clientInfo, String address) {
@@ -489,11 +531,12 @@ public class CustomerHandler extends AbstractPreAndPostProcessingAuthenticationH
         return zone.getMainInfo();
     }
 
-    public void insertfailurelog(String username, ClientInfo clientInfo, String content, String logsql, TxQueryRunner tx,
-                                 String address, String loginType) {
+    public void insertfailurelog(String username, ClientInfo clientInfo, String content, String logsql,
+                                 TxQueryRunner tx, String address, String loginType) {
         Date d = new Date();
         address = getCityAddress(clientInfo, address);
-        Object[] logparams = new Object[]{username, Constants.LOGIN_STATUS_FAIL, Constants.LOGIN, content, loginType, clientInfo.getClientIpAddress(), address, d};
+        Object[] logparams = new Object[]{username, Constants.LOGIN_STATUS_FAIL, Constants.LOGIN, content, loginType,
+                clientInfo.getClientIpAddress(), address, d};
         try {
             tx.update(logsql, logparams);
         } catch (Exception ex) {
@@ -504,7 +547,8 @@ public class CustomerHandler extends AbstractPreAndPostProcessingAuthenticationH
     public void insertldapSuccesslog(ClientInfo clientInfo, String username, String address, String logsql,
                                      TxQueryRunner tx, String loginType, String content) {
         Date d = new Date();
-        Object[] logparams = new Object[]{username, Constants.LOGIN_STATUS_SUCCESS, Constants.LOGIN, content, loginType, clientInfo.getClientIpAddress(), address, d};
+        Object[] logparams = new Object[]{username, Constants.LOGIN_STATUS_SUCCESS, Constants.LOGIN, content,
+                loginType, clientInfo.getClientIpAddress(), address, d};
 
         try {
             int logresult = tx.update(logsql, logparams);
