@@ -351,7 +351,7 @@ public class CustomerHandler extends AbstractPreAndPostProcessingAuthenticationH
                                     sqlinsert = sqlinsert + "etime,";
                                     params.add(Constants.FT.parse("9999-01-01 01:01:01"));
                                 }
-                                sqlinsert = sqlinsert + "pass,status,mfa) values (";
+                                sqlinsert = sqlinsert + "pass,type,status,sso_mfa) values (";
                                 for (String s : setupdate) {
                                     if (mapdb.get(s) != null && !"".equals(String.valueOf(mapdb.get(s)))) {
                                         sqlinsert = sqlinsert + "?,";
@@ -361,8 +361,9 @@ public class CustomerHandler extends AbstractPreAndPostProcessingAuthenticationH
                                     sqlinsert = sqlinsert + "?,";
                                 }
 
-                                sqlinsert = sqlinsert + "?,?,?)";
+                                sqlinsert = sqlinsert + "?,?,?,?)";
                                 params.add(pwd);
+                                params.add("员工");
                                 params.add("启用");
                                 params.add("禁用");
 
@@ -458,8 +459,9 @@ public class CustomerHandler extends AbstractPreAndPostProcessingAuthenticationH
                         insertfailurelog(username, clientInfo, Constants.LOGIN_FAIL, logsql, tx, address, MYSQL_LOGIN);
                         throw new FailedLoginException();
                     }
-                    if ("启用".equals((String) usermap.get("mfa"))) {
-                        String secretKey = (String) usermap.get("secretkey");
+                    if ("启用".equals((String) usermap.get("sso_mfa"))) {
+                        String secretKey = (String) usermap.get("mfa_secretkey");
+                        secretKey = AESUtil.decrypt(secretKey, Constants.MD5_SALT);
                         if (StringUtils.isBlank(code)) {
                             throw new DynamicCodeIsNullException();
                         } else {
