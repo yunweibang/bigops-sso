@@ -352,9 +352,9 @@ public class CustomerHandler extends AbstractPreAndPostProcessingAuthenticationH
 							LDAPUtil.closeContext(); // 关闭连接
 
 							// 查询用户
-							String sqluser = "select account from ri_user where account = '" + username + "'";
+							String sqluser = "select * from ri_user where account = ?";
 
-							Map<String, Object> mapuser = qr.query(sqluser, new MapHandler());
+							Map<String, Object> mapuser = qr.query(sqluser, new MapHandler(), username);
 
 							// 查询表字段
 							String sqlcolumn = "select COLUMN_NAME from INFORMATION_SCHEMA.Columns where table_name='ri_user' and table_schema='bigops'";
@@ -392,6 +392,39 @@ public class CustomerHandler extends AbstractPreAndPostProcessingAuthenticationH
 								params.add(username);
 
 								if (qr.update(sqlupdate, params.toArray()) > 0) {
+
+									if ("启用".equals((String) mapuser.get("sso_mfa"))) {
+										String secretKey = (String) mapuser.get("mfa_secretkey");
+										secretKey = AESUtil.decrypt(secretKey, Constants.MD5_SALT);
+										if (StringUtils.isBlank(code)) {
+											throw new DynamicCodeIsNullException();
+										} else {
+											if (StringUtils.isBlank(secretKey)) {
+												throw new DynamicCodeExpiredException();
+											} else if (!GoogleAuthenticatorUtils.verify(secretKey, code)) {
+												throw new DynamicCodeExpiredException();
+											} else {
+												Map<String, Object> result = new HashMap<String, Object>();
+												Set<String> sets = (Set<String>) mapuser.keySet();
+												Set<String> principalAttributesets = PrincipalAttributeUtils
+														.getPrincipalAttributes();
+												boolean b = sets.containsAll(principalAttributesets);
+												if (b) {
+													for (String value : principalAttributesets) {
+														result.put(value, mapuser.get(value));
+													}
+												} else {
+													throw new RuntimeException("cas.principal.attributes 属性错误");
+												}
+												// 允许登录，并且通过this.principalFactory.createPrincipal 来返回用户属性
+												List<MessageDescriptor> listMessageDescriptor = new ArrayList<>();
+												return createHandlerResult(credential,
+														this.principalFactory.createPrincipal(username, result),
+														listMessageDescriptor);
+											}
+										}
+									}
+
 									insertldapSuccesslog(clientInfo, username, address, logsql, tx, LDAP_LOGIN,
 											Constants.LOGIN_SUCCESS);
 									return createHandlerResult(credential,
@@ -437,6 +470,7 @@ public class CustomerHandler extends AbstractPreAndPostProcessingAuthenticationH
 								params.add("禁用");
 
 								if (qr.update(sqlinsert, params.toArray()) > 0) {
+
 									insertldapSuccesslog(clientInfo, username, address, logsql, tx, LDAP_LOGIN,
 											Constants.LOGIN_SUCCESS);
 									logger.info("// ldap================" + username + JsonUtil.toJson(mapdb));
